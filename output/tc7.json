@@ -1,0 +1,27 @@
+{
+  "generated_at": "2026-07-21T05:32:29.157024+00:00",
+  "file_a": "tc7_rotation_A.gds",
+  "file_b": "tc7_rotation_B.gds",
+  "layers": [
+    {
+      "layer": 1,
+      "datatype": 0,
+      "counts": {
+        "unchanged": 1,
+        "only_a": 0,
+        "only_b": 0,
+        "xor_regions": 0
+      },
+      "only_a": [],
+      "only_b": [],
+      "xor": []
+    }
+  ],
+  "summary": {
+    "total_layers_compared": 1,
+    "total_unchanged": 1,
+    "total_only_a": 0,
+    "total_only_b": 0,
+    "total_xor_regions": 0
+  }
+}

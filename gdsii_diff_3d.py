@@ -1,92 +1,117 @@
-#!/usr/bin/env python3
 """
-Sample Usage:
-    python gdsii_diff_3d.py file_a.gds file_b.gds [--output diff_3d.html] [--layers 1,2,3] [--extrude 0.5]
+Script to compare two GDSII files through a geometric XOR algorithm.
 
-Requirements:
-    pip install gdspy plotly numpy shapely
+gdsii_compare.py input_a.gdsii input_b.gdsii --output 3d_model.html
 """
 
 import argparse
 import sys
+import json
 from pathlib import Path
 from collections import defaultdict
+from datetime import datetime, timezone
 
+# Packages for polygons and gds reading
 import numpy as np
 import gdspy
 import plotly.graph_objects as go
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.ops import unary_union, triangulate
-HAS_SHAPELY = True
 
-# Colours
-COLOUR_BOTH   = "rgba(59,  130, 246, 0.55)"   # blue  unchanged
-COLOUR_A_ONLY = "rgba(239, 68,  68,  0.70)"   # red  only A
-COLOUR_B_ONLY = "rgba(34,  197, 94,  0.70)"   # green only B
-COLOUR_XOR    = "rgba(249, 115, 22,  0.65)"   # orange XOR region
+COLOUR_BOTH = "rgba(59, 130, 246, 0.55)" # blue
+COLOUR_A_ONLY = "rgba(239, 68, 68, 0.70)" # red
+COLOUR_B_ONLY = "rgba(34, 197, 94, 0.70)" # green
+COLOUR_XOR = "rgba(249, 115, 22, 0.65)" # orange
 
-EDGE_BOTH   = "rgba(59,  130, 246, 0.9)"
-EDGE_A_ONLY = "rgba(239, 68,  68,  1.0)"
-EDGE_B_ONLY = "rgba(34,  197, 94,  1.0)"
-EDGE_XOR    = "rgba(249, 115, 22,  1.0)"
+EDGE_BOTH = "rgba(59, 130, 246, 0.9)"
+EDGE_A_ONLY = "rgba(239, 68, 68, 1.0)"
+EDGE_B_ONLY = "rgba(34, 197, 94, 1.0)"
+EDGE_XOR = "rgba(249, 115, 22, 1.0)"
 
-
-# Helpers
-
-def load_gds(path: str) -> gdspy.GdsLibrary:
-    lib = gdspy.GdsLibrary()
-    lib.read_gds(path)
-    return lib
+LEGEND_HTML = (
+    "<b>Legend</b><br>"
+    "<span style='color:" + COLOUR_BOTH + "'></span> Unchanged (A B)<br>"
+    "<span style='color:" + COLOUR_A_ONLY + "'></span> Only in A (deleted)<br>"
+    "<span style='color:" + COLOUR_B_ONLY + "'></span> Only in B (added)<br>"
+    "<span style='color:" + COLOUR_XOR + "'></span> XOR difference<br><br>"
+)
 
 
-def flatten_polygons(lib: gdspy.GdsLibrary) -> dict:
+def poly_bbox(poly):
+    # Obtain bounding coordinates of the polygon box
+    xs = poly[:, 0]
+    ys = poly[:, 1]
+
+    return {
+        "xmin": float(xs.min()), "xmax": float(xs.max()),
+        "ymin": float(ys.min()), "ymax": float(ys.max()),
+    }
+
+
+def poly_area(poly):
+    # obtain area of polygon
+    s = ShapelyPolygon(poly)
+    if not s.is_valid:
+        s = s.buffer(0)
+    return float(s.area)
+
+def poly_entries(polys):
+    entries = []
+    for p in polys:
+        entries.append({
+            "vertices": np.round(p, 6).tolist(),
+            "bbox": poly_bbox(p),
+            "area": round(poly_area(p), 6),
+        })
+    return entries
+
+def poly_signature(poly, decimals = 4):
+    # To obtain polygon signature, obtain rotations of the polygon
+    rounded = np.round(poly, decimals)
+    pts = [tuple(p) for p in rounded]
+    rotations = [pts[i:] + pts[:i] for i in range(len(pts))]
+
+    return frozenset(map(tuple, min(rotations)))
+
+def classify_polygons(polys_a, polys_b):
+    # Build polygon signature dicts and convert to sets for fast comparison
+    sigs_a = {poly_signature(p): p for p in polys_a}
+    sigs_b = {poly_signature(p): p for p in polys_b}
+    ka, kb = set(sigs_a), set(sigs_b)
+
+    return (
+        [sigs_a[k] for k in ka - kb],
+        [sigs_b[k] for k in kb - ka],
+        [sigs_a[k] for k in ka & kb],
+    )
+
+def flatten_polygons(lib):
+    # Remove cell references for polygon comparison
     result = defaultdict(list)
     for cell in lib.cells.values():
         flat = cell.get_polygons(by_spec=True)
         for (layer, dtype), polys in flat.items():
             result[(layer, dtype)].extend(polys)
+
     return dict(result)
 
 
-def poly_signature(poly: np.ndarray, decimals: int = 4) -> frozenset:
-    rounded = np.round(poly, decimals)
-    pts = [tuple(p) for p in rounded]
-    rotations = [pts[i:] + pts[:i] for i in range(len(pts))]
-    return frozenset(map(tuple, min(rotations)))
-
-
-def classify_polygons(polys_a, polys_b):
-    sigs_a = {poly_signature(p): p for p in polys_a}
-    sigs_b = {poly_signature(p): p for p in polys_b}
-    ka, kb = set(sigs_a), set(sigs_b)
-    return (
-        [sigs_a[k] for k in ka - kb],   # only_a
-        [sigs_b[k] for k in kb - ka],   # only_b
-        [sigs_a[k] for k in ka & kb],   # shared
-    )
-
-
-# XOR
+def to_union(polys):
+    # obtain union of the shapes
+    shapes = []
+    for p in polys:
+        s = ShapelyPolygon(p)
+        if s.is_valid and not s.is_empty:
+            shapes.append(s)
+    return unary_union(shapes) if shapes else ShapelyPolygon()
 
 def shapely_xor_polys(polys_a, polys_b):
-    if not HAS_SHAPELY:
-        return []
-
-    def to_union(polys):
-        shapes = []
-        for p in polys:
-            try:
-                s = ShapelyPolygon(p)
-                if s.is_valid and not s.is_empty:
-                    shapes.append(s)
-            except Exception:
-                pass
-        return unary_union(shapes) if shapes else ShapelyPolygon()
-
+    # Perform xor on the union of the polygons
     geom_a = to_union(polys_a)
     geom_b = to_union(polys_b)
     xor = geom_a.symmetric_difference(geom_b)
 
+    # Convert format to readable dict
     result = []
     geoms = [xor] if xor.geom_type == "Polygon" else list(xor.geoms)
     for g in geoms:
@@ -96,45 +121,36 @@ def shapely_xor_polys(polys_a, polys_b):
     return result
 
 
-# 3D Extrusion
-
-def triangulate_polygon(poly: np.ndarray):
+def triangulate_polygon(poly):
+    # convert polygons to triangles for extrusion
     n = len(poly)
     if n < 3:
         return poly, []
-    # Simple fan from vertex 0 — works for convex; for concave use shapely
-    if HAS_SHAPELY:
-        try:
-            s = ShapelyPolygon(poly)
-            if not s.is_valid:
-                s = s.buffer(0)
-            tris = triangulate(s)
-            verts = list(poly)
-            vert_map = {tuple(np.round(v, 6)): i for i, v in enumerate(verts)}
-            triangles = []
-            for tri in tris:
-                if tri.is_empty:
-                    continue
-                c = np.array(tri.exterior.coords[:-1])
-                idxs = []
-                for pt in c:
-                    key = tuple(np.round(pt, 6))
-                    if key not in vert_map:
-                        vert_map[key] = len(verts)
-                        verts.append(pt)
-                    idxs.append(vert_map[key])
-                if len(idxs) == 3:
-                    triangles.append(tuple(idxs))
-            return np.array(verts), triangles
-        except Exception:
-            pass
-    # Fallback: fan triangulation
-    verts = poly
-    triangles = [(0, i, i + 1) for i in range(1, n - 2)]
-    return verts, triangles
+    s = ShapelyPolygon(poly)
+    if not s.is_valid:
+        s = s.buffer(0)
+    verts = list(poly)
+    vert_map = {tuple(np.round(v, 6)): i for i, v in enumerate(verts)}
+    triangles = []
+    for tri in triangulate(s):
+        if tri.is_empty:
+            continue
+        c = np.array(tri.exterior.coords[:-1])
+        idxs = []
+        for pt in c:
+            key = tuple(np.round(pt, 6))
+            if key not in vert_map:
+                vert_map[key] = len(verts)
+                verts.append(pt)
+            idxs.append(vert_map[key])
+        if len(idxs) == 3:
+            triangles.append(tuple(idxs))
+    return np.array(verts), triangles
 
+# Extrusion
 
-def extrude_polygon_mesh(poly: np.ndarray, z_bot: float, z_top: float):
+def extrude_polygon_mesh(poly, z_bot, z_top):
+    # Process the input
     poly2d = poly[:-1] if np.allclose(poly[0], poly[-1]) else poly
     if len(poly2d) < 3:
         return None
@@ -144,8 +160,7 @@ def extrude_polygon_mesh(poly: np.ndarray, z_bot: float, z_top: float):
     if not tris:
         return None
 
-    # Bottom cap verts: indices 0..n-1  (z = z_bot)
-    # Top    cap verts: indices n..2n-1 (z = z_top)
+    # Duplicate vertices for top and bottom edges
     x_b, y_b = verts2d[:, 0], verts2d[:, 1]
     x_t, y_t = x_b.copy(), y_b.copy()
 
@@ -155,11 +170,11 @@ def extrude_polygon_mesh(poly: np.ndarray, z_bot: float, z_top: float):
 
     ii, jj, kk = [], [], []
 
-    # Bottom cap (reversed winding for outward normal)
+    # Build bottom surface
     for (a, b, c) in tris:
         ii.append(a); jj.append(c); kk.append(b)
 
-    # Top cap
+    # Build top surface
     for (a, b, c) in tris:
         ii.append(a + n); jj.append(b + n); kk.append(c + n)
 
@@ -167,9 +182,8 @@ def extrude_polygon_mesh(poly: np.ndarray, z_bot: float, z_top: float):
     m = len(poly2d)
     for idx in range(m):
         nxt = (idx + 1) % m
-        b0, b1 = idx, nxt          # bottom edge
-        t0, t1 = idx + n, nxt + n  # top edge
-        # Two triangles per quad
+        b0, b1 = idx, nxt
+        t0, t1 = idx + n, nxt + n
         ii += [b0, b0]; jj += [b1, t1]; kk += [t0, b1]
 
     return x.tolist(), y.tolist(), z.tolist(), ii, jj, kk
@@ -179,7 +193,7 @@ def make_mesh_trace(polys, z_bot, z_top, colour, edge_colour, name, legendgroup,
     all_x, all_y, all_z = [], [], []
     all_i, all_j, all_k = [], [], []
     offset = 0
-
+    # Convert each 2D polygon into 3D through extrusion based on configured heights.
     for poly in polys:
         result = extrude_polygon_mesh(poly, z_bot, z_top)
         if result is None:
@@ -194,27 +208,24 @@ def make_mesh_trace(polys, z_bot, z_top, colour, edge_colour, name, legendgroup,
     if not all_x:
         return None
 
+    # Build 3D mesh object
     return go.Mesh3d(
         x=all_x, y=all_y, z=all_z,
         i=all_i, j=all_j, k=all_k,
         color=colour,
         flatshading=True,
-        lighting=dict(diffuse=0.7, specular=0.3, ambient=0.4, roughness=0.6),
-        lightposition=dict(x=1000, y=2000, z=3000),
         name=name,
         legendgroup=legendgroup,
         showlegend=showlegend,
-        hovertemplate=f"<b>{name}</b><br>x: %{{x:.3f}}<br>y: %{{y:.3f}}<br>z: %{{z:.3f}}<extra></extra>",
     )
 
-
 def make_outline_trace(polys, z_top, edge_colour, name, legendgroup, showlegend=False):
+    # Outline trace for 3D model output.
     xs, ys, zs = [], [], []
     for poly in polys:
         p = poly[:-1] if np.allclose(poly[0], poly[-1]) else poly
         for pt in p:
             xs.append(pt[0]); ys.append(pt[1]); zs.append(z_top)
-        # close loop
         xs.append(p[0][0]); ys.append(p[0][1]); zs.append(z_top)
         xs.append(None); ys.append(None); zs.append(None)
 
@@ -229,17 +240,142 @@ def make_outline_trace(polys, z_top, edge_colour, name, legendgroup, showlegend=
     )
 
 
-# Figure building
+# Reports
+
+def write_text_report(report, out_path):
+    # Summary details
+    lines = []
+    lines.append("=" * 70)
+    lines.append("GDSII 3D DIFF REPORT")
+    lines.append("=" * 70)
+    lines.append(f"Generated : {report['generated_at']}")
+    lines.append(f"File A    : {report['file_a']}")
+    lines.append(f"File B    : {report['file_b']}")
+    lines.append("")
+    s = report["summary"]
+    lines.append("Overall Summary")
+    lines.append("-" * 70)
+    lines.append(f"  Layers compared : {s['total_layers_compared']}")
+    lines.append(f"  Unchanged polys : {s['total_unchanged']}")
+    lines.append(f"  Only in A (del) : {s['total_only_a']}")
+    lines.append(f"  Only in B (add) : {s['total_only_b']}")
+    lines.append(f"  XOR regions     : {s['total_xor_regions']}")
+    lines.append("")
+
+    # Details for each layer
+    for layer in report["layers"]:
+        c = layer["counts"]
+        lines.append("-" * 70)
+        lines.append(f"Layer {layer['layer']} / Datatype {layer['datatype']}")
+        lines.append("-" * 70)
+        lines.append(f"  Unchanged : {c['unchanged']}")
+        lines.append(f"  Only A    : {c['only_a']}")
+        lines.append(f"  Only B    : {c['only_b']}")
+        lines.append(f"  XOR       : {c['xor_regions']}")
+
+        if layer["only_a"]:
+            lines.append("  Only-in-A polygons (deleted):")
+            for i, e in enumerate(layer["only_a"], 1):
+                bb = e["bbox"]
+                lines.append(
+                    f"    [{i}] area={e['area']:.4f} "
+                    f"bbox=({bb['xmin']:.3f},{bb['ymin']:.3f}) -> "
+                    f"({bb['xmax']:.3f},{bb['ymax']:.3f})"
+                )
+
+        if layer["only_b"]:
+            lines.append("  Only-in-B polygons (added):")
+            for i, e in enumerate(layer["only_b"], 1):
+                bb = e["bbox"]
+                lines.append(
+                    f"    [{i}] area={e['area']:.4f} "
+                    f"bbox=({bb['xmin']:.3f},{bb['ymin']:.3f}) -> "
+                    f"({bb['xmax']:.3f},{bb['ymax']:.3f})"
+                )
+
+        if layer["xor"]:
+            lines.append("  XOR difference regions:")
+            for i, e in enumerate(layer["xor"], 1):
+                bb = e["bbox"]
+                lines.append(
+                    f"    [{i}] area={e['area']:.4f} "
+                    f"bbox=({bb['xmin']:.3f},{bb['ymin']:.3f}) -> "
+                    f"({bb['xmax']:.3f},{bb['ymax']:.3f})"
+                )
+
+        lines.append("")
+
+    with open(out_path, "w") as f:
+        f.write("\n".join(lines))
+    print(f"Saved text diff report: {out_path}")
+
+def build_diff_report(path_a, path_b, all_keys, polys_a, polys_b, layer_results):
+    # Build hash for report output formats
+    report = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "file_a": Path(path_a).name,
+        "file_b": Path(path_b).name,
+        "layers": [],
+        "summary": {
+            "total_layers_compared": len(all_keys),
+            "total_unchanged": 0,
+            "total_only_a": 0,
+            "total_only_b": 0,
+            "total_xor_regions": 0,
+        },
+    }
+
+    for lk in all_keys:
+        res = layer_results[lk]
+        only_a, only_b, shared, xor_polys = (
+            res["only_a"], res["only_b"], res["shared"], res["xor"]
+        )
+
+
+
+        layer_entry = {
+            "layer": int(lk[0]),
+            "datatype": int(lk[1]),
+            "counts": {
+                "unchanged": len(shared),
+                "only_a": len(only_a),
+                "only_b": len(only_b),
+                "xor_regions": len(xor_polys),
+            },
+            "only_a": poly_entries(only_a),
+            "only_b": poly_entries(only_b),
+            "xor": poly_entries(xor_polys),
+        }
+
+        report["layers"].append(layer_entry)
+
+        report["summary"]["total_unchanged"] += len(shared)
+        report["summary"]["total_only_a"] += len(only_a)
+        report["summary"]["total_only_b"] += len(only_b)
+        report["summary"]["total_xor_regions"] += len(xor_polys)
+
+    return report
+
+
+def write_json_report(report, out_path):
+    with open(out_path, "w") as f:
+        json.dump(report, f, indent=2)
+    print(f"Saved JSON diff report: {out_path}")
+
+
 
 def build_figure(path_a, path_b, layer_filter, extrude_height):
     print(f"Loading A: {path_a}")
-    lib_a = load_gds(path_a)
+    lib_a = gdspy.GdsLibrary()
+    lib_a.read_gds(path_a)
     print(f"Loading B: {path_b}")
-    lib_b = load_gds(path_b)
+    lib_b = gdspy.GdsLibrary()
+    lib_b.read_gds(path_b)
 
     polys_a = flatten_polygons(lib_a)
     polys_b = flatten_polygons(lib_b)
 
+    # get working layers
     all_keys = sorted(set(polys_a) | set(polys_b))
     if layer_filter:
         all_keys = [k for k in all_keys if k[0] in layer_filter]
@@ -247,10 +383,12 @@ def build_figure(path_a, path_b, layer_filter, extrude_height):
         sys.exit("No layers found (check --layers filter).")
 
     traces = []
-    layer_z = {}   # (layer_key) -> z_bot
+    layer_z = {}
+    layer_results = {}
     Z_GAP = extrude_height * 2.5
 
     for idx, lk in enumerate(all_keys):
+        # layer height limits
         z_bot = idx * (extrude_height + Z_GAP)
         z_top = z_bot + extrude_height
         layer_z[lk] = (z_bot, z_top)
@@ -260,37 +398,51 @@ def build_figure(path_a, path_b, layer_filter, extrude_height):
         only_a, only_b, shared = classify_polygons(a_polys, b_polys)
         xor_polys = shapely_xor_polys(a_polys, b_polys)
 
+        layer_results[lk] = {
+            "only_a": only_a, "only_b": only_b,
+            "shared": shared, "xor": xor_polys,
+        }
+
         label = f"L{lk[0]}/D{lk[1]}"
         print(f"  {label}: {len(shared)} unchanged, {len(only_a)} only-A, "
               f"{len(only_b)} only-B, {len(xor_polys)} XOR polygons")
 
-        first = True  # show legend entry only for first set in a layer
+        first = True
+
+
 
         if shared:
             t = make_mesh_trace(shared, z_bot, z_top, COLOUR_BOTH, EDGE_BOTH,
-                                f"{label} — Unchanged", label, showlegend=first)
-            if t: traces.append(t); first = False
-            traces.append(make_outline_trace(shared, z_top, EDGE_BOTH, f"{label} — Unchanged", label))
+                                 f"{label} - Unchanged", label, showlegend=first)
+            if t: 
+                traces.append(t)
+                first = False
+            traces.append(make_outline_trace(shared, z_top, EDGE_BOTH, f"{label} - Unchanged", label))
 
         if only_a:
             t = make_mesh_trace(only_a, z_bot, z_top, COLOUR_A_ONLY, EDGE_A_ONLY,
-                                f"{label} — Only A (del)", label, showlegend=first)
-            if t: traces.append(t); first = False
-            traces.append(make_outline_trace(only_a, z_top, EDGE_A_ONLY, f"{label} — Only A", label))
+                                 f"{label} - Only A (del)", label, showlegend=first)
+            if t: 
+                traces.append(t)
+                first = False
+            traces.append(make_outline_trace(only_a, z_top, EDGE_A_ONLY, f"{label} - Only A", label))
 
         if only_b:
             t = make_mesh_trace(only_b, z_bot, z_top, COLOUR_B_ONLY, EDGE_B_ONLY,
-                                f"{label} — Only B (add)", label, showlegend=first)
-            if t: traces.append(t); first = False
-            traces.append(make_outline_trace(only_b, z_top, EDGE_B_ONLY, f"{label} — Only B", label))
+                                 f"{label} - Only B (add)", label, showlegend=first)
+            if t: 
+                traces.append(t)
+                first = False
+            traces.append(make_outline_trace(only_b, z_top, EDGE_B_ONLY, f"{label} - Only B", label))
 
         if xor_polys:
             t = make_mesh_trace(xor_polys, z_top, z_top + extrude_height * 0.15,
-                                COLOUR_XOR, EDGE_XOR,
-                                f"{label} — XOR diff", label, showlegend=first)
-            if t: traces.append(t)
+                                 COLOUR_XOR, EDGE_XOR,
+                                 f"{label} - XOR diff", label, showlegend=first)
+            if t: 
+                traces.append(t)
             traces.append(make_outline_trace(xor_polys, z_top + extrude_height * 0.15,
-                                             EDGE_XOR, f"{label} — XOR", label))
+                                              EDGE_XOR, f"{label} - XOR", label))
 
     all_polys_flat = [p for lst in list(polys_a.values()) + list(polys_b.values()) for p in lst]
     if all_polys_flat:
@@ -304,24 +456,11 @@ def build_figure(path_a, path_b, layer_filter, extrude_height):
     for lk in all_keys:
         z_bot, z_top = layer_z[lk]
         label = f"Layer {lk[0]} / Datatype {lk[1]}"
-        # Grid plane
-        traces.append(go.Mesh3d(
-            x=[xmin - pad, xmax + pad, xmax + pad, xmin - pad],
-            y=[ymin - pad, ymin - pad, ymax + pad, ymax + pad],
-            z=[z_bot, z_bot, z_bot, z_bot],
-            i=[0, 0], j=[1, 2], k=[2, 3],
-            color="rgba(255,255,255,0.03)",
-            flatshading=True,
-            showlegend=False,
-            hoverinfo="skip",
-            name=label + " plane",
-        ))
-        # Layer label at corner
         traces.append(go.Scatter3d(
             x=[xmin - pad * 0.5], y=[ymin - pad * 0.5], z=[(z_bot + z_top) / 2],
             mode="text",
             text=[label],
-            textfont=dict(size=11, color="rgba(200,200,200,0.8)"),
+            textfont=dict(size=11),
             showlegend=False,
             hoverinfo="skip",
         ))
@@ -329,94 +468,83 @@ def build_figure(path_a, path_b, layer_filter, extrude_height):
     name_a = Path(path_a).name
     name_b = Path(path_b).name
 
+    # 3D model output structure based on plotly.
     layout = go.Layout(
         title=dict(
-            text=f"<b>GDSII 3D Diff</b>  ·  <span style='color:#f87171'>{name_a}</span>"
-                 f"  vs  <span style='color:#4ade80'>{name_b}</span>",
-            font=dict(size=18, color="#f9fafb"),
+            text=f"GDSII 3D Diff  {name_a} vs {name_b}",
             x=0.5,
         ),
-        paper_bgcolor="#0f172a",
         scene=dict(
-            bgcolor="#0f172a",
-            xaxis=dict(title="X (µm)", color="#94a3b8", gridcolor="#1e293b",
-                       showbackground=True, backgroundcolor="#0f172a"),
-            yaxis=dict(title="Y (µm)", color="#94a3b8", gridcolor="#1e293b",
-                       showbackground=True, backgroundcolor="#0f172a"),
-            zaxis=dict(title="Layer (Z)", color="#94a3b8", gridcolor="#1e293b",
-                       showbackground=True, backgroundcolor="#0f172a",
-                       tickvals=[((z_bot + z_top) / 2)
-                                 for z_bot, z_top in layer_z.values()],
-                       ticktext=[f"L{k[0]}/D{k[1]}" for k in all_keys]),
+            xaxis=dict(title="X (microm)"),
+            yaxis=dict(title="Y (microm)"),
+            zaxis=dict(
+                title="Layer (Z)",
+                tickvals=[((z_bot + z_top) / 2) for z_bot, z_top in layer_z.values()],
+                ticktext=[f"L{k[0]}/D{k[1]}" for k in all_keys],
+            ),
             camera=dict(eye=dict(x=1.5, y=-1.8, z=1.4)),
             aspectmode="data",
         ),
         legend=dict(
-            bgcolor="rgba(15,23,42,0.85)",
-            bordercolor="#334155",
-            borderwidth=1,
-            font=dict(color="#cbd5e1", size=11),
             itemsizing="constant",
             tracegroupgap=6,
         ),
         annotations=[
             dict(
                 text=(
-                    "<b>Legend</b><br>"
-                    "<span style='color:#3b82f6'>■</span> Unchanged (A∩B)<br>"
-                    "<span style='color:#ef4444'>■</span> Only in A (deleted)<br>"
-                    "<span style='color:#22c55e'>■</span> Only in B (added)<br>"
-                    "<span style='color:#f97316'>■</span> XOR difference<br><br>"
-                    f"<span style='color:#f87171'>A: {name_a}</span><br>"
-                    f"<span style='color:#4ade80'>B: {name_b}</span>"
+                    LEGEND_HTML + 
+                    "<span style='color:" + COLOUR_A_ONLY + f"'>A: {name_a}</span><br>"
+                    "<span style='color:" + COLOUR_B_ONLY + f"'>B: {name_b}</span>"
                 ),
                 align="left",
                 showarrow=False,
                 xref="paper", yref="paper",
                 x=0.01, y=0.98,
-                bgcolor="rgba(15,23,42,0.85)",
-                bordercolor="#334155",
-                borderwidth=1,
-                font=dict(size=12, color="#cbd5e1"),
-            )
+            ),
         ],
         margin=dict(l=0, r=0, t=60, b=0),
-        hoverlabel=dict(bgcolor="#1e293b", font_color="#f1f5f9", font_size=12),
     )
 
     fig = go.Figure(data=traces, layout=layout)
-    return fig
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Interactive 3D GDSII diff viewer (outputs HTML).",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python gdsii_diff_3d.py design_v1.gds design_v2.gds --output my_diff.html
-  
-        """)
-    parser.add_argument("file_a", help="First GDSII file")
-    parser.add_argument("file_b", help="Second GDSII file")
-    parser.add_argument("--output", default="gdsii_diff_3d.html",
-                        help="Output HTML path (default: gdsii_diff_3d.html)")
-    parser.add_argument("--layers", default=None,
-                        help="Comma-separated layer numbers, e.g. 1,2,10")
-    parser.add_argument("--extrude", type=float, default=1.0,
-                        help="Extrusion height per layer slab (default: 1.0 µm)")
-    args = parser.parse_args()
+    diff_report = build_diff_report(path_a, path_b, all_keys, polys_a, polys_b, layer_results)
 
-    layer_filter = None
-    if args.layers:
-        try:
-            layer_filter = [int(x.strip()) for x in args.layers.split(",")]
-        except ValueError:
-            sys.exit("--layers must be comma-separated integers, e.g.  --layers 1,2,10")
+    return fig, diff_report
 
-    fig = build_figure(args.file_a, args.file_b, layer_filter, args.extrude)
-    fig.write_html(args.output, include_plotlyjs="cdn", full_html=True)
-    print(f"\nSaved: {args.output}  (open in any browser)")
+# Start of main
 
+parser = argparse.ArgumentParser(description="GDSII Comparison tool with HTML, JSON, and text reports.")
+parser.add_argument("file_a")
+parser.add_argument("file_b")
+parser.add_argument("--output", default="gdsii_diff_3d.html")
+parser.add_argument("--json", dest="json_output", default=None)
+parser.add_argument("--text", dest="text_output", default=None)
+parser.add_argument("--layers", default=None)
+parser.add_argument("--extrude", type=float, default=1.0)
+parser.add_argument("--no-json", action="store_true")
+parser.add_argument("--no-text", action="store_true")
+args = parser.parse_args()
 
-if __name__ == "__main__":
-    main()
+# Filter layers
+layer_filter = None
+if args.layers:
+    try:
+        layer_filter = [int(x.strip()) for x in args.layers.split(",")]
+    except ValueError:
+        exit("--layers must be comma-separated integers, e.g. --layers 1,2,10")
+
+# Run diff and get result
+fig, diff_report = build_figure(args.file_a, args.file_b, layer_filter, args.extrude)
+fig.write_html(args.output, include_plotlyjs="cdn", full_html=True)
+print(f"\nSaved HTML: {args.output}")
+
+output_stem = Path(args.output).with_suffix("")
+
+# Output additional reports as selected
+if not args.no_json:
+    json_path = args.json_output or f"{output_stem}.json"
+    write_json_report(diff_report, json_path)
+
+if not args.no_text:
+    text_path = args.text_output or f"{output_stem}.txt"
+    write_text_report(diff_report, text_path)

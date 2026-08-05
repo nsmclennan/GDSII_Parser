@@ -1,0 +1,40 @@
+{
+  "generated_at": "2026-07-21T05:32:27.559898+00:00",
+  "file_a": "tc1_identical_A.gds",
+  "file_b": "tc1_identical_B.gds",
+  "layers": [
+    {
+      "layer": 1,
+      "datatype": 0,
+      "counts": {
+        "unchanged": 3,
+        "only_a": 0,
+        "only_b": 0,
+        "xor_regions": 0
+      },
+      "only_a": [],
+      "only_b": [],
+      "xor": []
+    },
+    {
+      "layer": 2,
+      "datatype": 0,
+      "counts": {
+        "unchanged": 2,
+        "only_a": 0,
+        "only_b": 0,
+        "xor_regions": 0
+      },
+      "only_a": [],
+      "only_b": [],
+      "xor": []
+    }
+  ],
+  "summary": {
+    "total_layers_compared": 2,
+    "total_unchanged": 5,
+    "total_only_a": 0,
+    "total_only_b": 0,
+    "total_xor_regions": 0
+  }
+}

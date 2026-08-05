@@ -1,0 +1,146 @@
+{
+  "generated_at": "2026-07-21T05:32:29.740001+00:00",
+  "file_a": "tc9_overlap_A.gds",
+  "file_b": "tc9_overlap_B.gds",
+  "layers": [
+    {
+      "layer": 1,
+      "datatype": 0,
+      "counts": {
+        "unchanged": 0,
+        "only_a": 1,
+        "only_b": 1,
+        "xor_regions": 2
+      },
+      "only_a": [
+        {
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0
+            ],
+            [
+              10.0,
+              10.0
+            ],
+            [
+              0.0,
+              10.0
+            ]
+          ],
+          "bbox": {
+            "xmin": 0.0,
+            "xmax": 10.0,
+            "ymin": 0.0,
+            "ymax": 10.0
+          },
+          "area": 100.0
+        }
+      ],
+      "only_b": [
+        {
+          "vertices": [
+            [
+              5.0,
+              0.0
+            ],
+            [
+              15.0,
+              0.0
+            ],
+            [
+              15.0,
+              10.0
+            ],
+            [
+              5.0,
+              10.0
+            ]
+          ],
+          "bbox": {
+            "xmin": 5.0,
+            "xmax": 15.0,
+            "ymin": 0.0,
+            "ymax": 10.0
+          },
+          "area": 100.0
+        }
+      ],
+      "xor": [
+        {
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              10.0
+            ],
+            [
+              5.0,
+              10.0
+            ],
+            [
+              5.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "bbox": {
+            "xmin": 0.0,
+            "xmax": 5.0,
+            "ymin": 0.0,
+            "ymax": 10.0
+          },
+          "area": 50.0
+        },
+        {
+          "vertices": [
+            [
+              10.0,
+              10.0
+            ],
+            [
+              15.0,
+              10.0
+            ],
+            [
+              15.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0
+            ],
+            [
+              10.0,
+              10.0
+            ]
+          ],
+          "bbox": {
+            "xmin": 10.0,
+            "xmax": 15.0,
+            "ymin": 0.0,
+            "ymax": 10.0
+          },
+          "area": 50.0
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_layers_compared": 1,
+    "total_unchanged": 0,
+    "total_only_a": 1,
+    "total_only_b": 1,
+    "total_xor_regions": 2
+  }
+}

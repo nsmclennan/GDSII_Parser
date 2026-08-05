@@ -1,0 +1,87 @@
+{
+  "generated_at": "2026-07-21T05:32:27.820890+00:00",
+  "file_a": "tc2_added_A.gds",
+  "file_b": "tc2_added_B.gds",
+  "layers": [
+    {
+      "layer": 1,
+      "datatype": 0,
+      "counts": {
+        "unchanged": 5,
+        "only_a": 0,
+        "only_b": 1,
+        "xor_regions": 1
+      },
+      "only_a": [],
+      "only_b": [
+        {
+          "vertices": [
+            [
+              50.0,
+              50.0
+            ],
+            [
+              52.0,
+              50.0
+            ],
+            [
+              52.0,
+              52.0
+            ],
+            [
+              50.0,
+              52.0
+            ]
+          ],
+          "bbox": {
+            "xmin": 50.0,
+            "xmax": 52.0,
+            "ymin": 50.0,
+            "ymax": 52.0
+          },
+          "area": 4.0
+        }
+      ],
+      "xor": [
+        {
+          "vertices": [
+            [
+              50.0,
+              50.0
+            ],
+            [
+              50.0,
+              52.0
+            ],
+            [
+              52.0,
+              52.0
+            ],
+            [
+              52.0,
+              50.0
+            ],
+            [
+              50.0,
+              50.0
+            ]
+          ],
+          "bbox": {
+            "xmin": 50.0,
+            "xmax": 52.0,
+            "ymin": 50.0,
+            "ymax": 52.0
+          },
+          "area": 4.0
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_layers_compared": 1,
+    "total_unchanged": 5,
+    "total_only_a": 0,
+    "total_only_b": 1,
+    "total_xor_regions": 1
+  }
+}

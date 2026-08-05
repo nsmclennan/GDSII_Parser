@@ -1,0 +1,4 @@
+gdspy 
+plotly 
+numpy 
+shapely

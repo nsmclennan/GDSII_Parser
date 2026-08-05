@@ -1,0 +1,146 @@
+{
+  "generated_at": "2026-07-21T05:32:28.344729+00:00",
+  "file_a": "tc4_moved_A.gds",
+  "file_b": "tc4_moved_B.gds",
+  "layers": [
+    {
+      "layer": 1,
+      "datatype": 0,
+      "counts": {
+        "unchanged": 0,
+        "only_a": 1,
+        "only_b": 1,
+        "xor_regions": 2
+      },
+      "only_a": [
+        {
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0
+            ],
+            [
+              4.0,
+              4.0
+            ],
+            [
+              0.0,
+              4.0
+            ]
+          ],
+          "bbox": {
+            "xmin": 0.0,
+            "xmax": 4.0,
+            "ymin": 0.0,
+            "ymax": 4.0
+          },
+          "area": 16.0
+        }
+      ],
+      "only_b": [
+        {
+          "vertices": [
+            [
+              0.5,
+              0.0
+            ],
+            [
+              4.5,
+              0.0
+            ],
+            [
+              4.5,
+              4.0
+            ],
+            [
+              0.5,
+              4.0
+            ]
+          ],
+          "bbox": {
+            "xmin": 0.5,
+            "xmax": 4.5,
+            "ymin": 0.0,
+            "ymax": 4.0
+          },
+          "area": 16.0
+        }
+      ],
+      "xor": [
+        {
+          "vertices": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              4.0
+            ],
+            [
+              0.5,
+              4.0
+            ],
+            [
+              0.5,
+              0.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ],
+          "bbox": {
+            "xmin": 0.0,
+            "xmax": 0.5,
+            "ymin": 0.0,
+            "ymax": 4.0
+          },
+          "area": 2.0
+        },
+        {
+          "vertices": [
+            [
+              4.0,
+              4.0
+            ],
+            [
+              4.5,
+              4.0
+            ],
+            [
+              4.5,
+              0.0
+            ],
+            [
+              4.0,
+              0.0
+            ],
+            [
+              4.0,
+              4.0
+            ]
+          ],
+          "bbox": {
+            "xmin": 4.0,
+            "xmax": 4.5,
+            "ymin": 0.0,
+            "ymax": 4.0
+          },
+          "area": 2.0
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_layers_compared": 1,
+    "total_unchanged": 0,
+    "total_only_a": 1,
+    "total_only_b": 1,
+    "total_xor_regions": 2
+  }
+}
